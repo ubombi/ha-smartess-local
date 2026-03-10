@@ -27,6 +27,12 @@ Protocol reverse-engineered from the SmartESS Android app.
                             "set>server=<ha_ip>:8899;"
 ```
 
+## Screenthoots
+
+![Main screen screenshot](docs/assets/images/main.png "multiple inverters per logger, multiple loggers")
+![Autodiscovery/Onboarding screenshot](docs/assets/images/autodicovery.png "Autodiscovery finds loggers in local subnet")
+![Pooling interval settings screenshot](docs/assets/images/pooling.png "You can adjust pooling interwals")
+![HA Device screenshot](docs/assets/images/demo.png "That's how it looks like")
 
 ## Protocol
 
