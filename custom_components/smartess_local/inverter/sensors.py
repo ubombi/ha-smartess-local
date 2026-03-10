@@ -68,18 +68,10 @@ _GS_SENSORS = [
     # --- CONFIRMED: raw 032 = 32°C, NO ×0.1 scale ---
     SensorDef("inverter_heat_sink_temp",  13, "°C", "temperature",    "measurement",
               icon="mdi:thermometer"),
-    # --- Fields 14-15: zero on 0994 firmware, PV data is at 16/18 instead ---
-    SensorDef("pv_input_current_legacy",  14, "A",  "current",        "measurement", scale=0.1,
-              icon="mdi:solar-power", label="PV Input Current (legacy)",
-              enabled_default=False),  # unused on 0994, PV current not reported separately
-    SensorDef("pv_input_voltage_legacy",  15, "V",  "voltage",        "measurement", scale=0.1,
-              icon="mdi:solar-power", label="PV Input Voltage (legacy)",
-              enabled_default=False),  # unused on 0994, PV voltage at index 18
-    # --- CONFIRMED: PV1 power and voltage (verified against SmartESS app) ---
+    # --- Fields 14-15: always zero on 0994, PV data at 16/18 instead ---
+    # --- Fields 16-18: CONFIRMED PV1 power and voltage (verified against SmartESS app) ---
     SensorDef("pv1_input_power",          16, "W",  "power",          "measurement",
               icon="mdi:solar-power", label="PV1 Input Power"),
-    SensorDef("gs_field_17",              17, value_type=int,
-              enabled_default=False),  # always 0, purpose unknown
     SensorDef("pv1_input_voltage",        18, "V",  "voltage",        "measurement", scale=0.1,
               icon="mdi:solar-power", label="PV1 Input Voltage"),
     SensorDef("pv2_input_power",          19, "W",  "power",          "measurement",
@@ -101,8 +93,6 @@ _GS_SENSORS = [
 # ---------------------------------------------------------------------------
 
 _GS2_SENSORS = [
-    SensorDef("pv2_input_current",   0, "A", "current", "measurement", scale=0.1,
-              icon="mdi:solar-power", label="PV2 Input Current"),
     SensorDef("pv2_input_voltage",   1, "V", "voltage", "measurement", scale=0.1,
               icon="mdi:solar-power", label="PV2 Input Voltage"),
     SensorDef("pv2_charging_power",  2, "W", "power",   "measurement",
