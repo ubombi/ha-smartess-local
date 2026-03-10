@@ -60,6 +60,20 @@ def _get_local_ip() -> str:
         return "127.0.0.1"
 
 
+def _arp_lookup(ip: str) -> str | None:
+    """Look up MAC address from the system ARP cache. Linux only."""
+    try:
+        with open("/proc/net/arp") as f:
+            for line in f:
+                if line.startswith(ip + " "):
+                    mac = line.split()[3]
+                    if mac and mac != "00:00:00:00:00:00":
+                        return mac
+    except OSError:
+        pass
+    return None
+
+
 @dataclass
 class InverterInfo:
     """Per-inverter metadata, populated from startup commands."""
@@ -88,6 +102,7 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Collector info (populated after first heartbeat)
         self.collector_pn: str = ""
         self.collector_ip: str = ""
+        self.collector_mac: str | None = None
 
         # Per-inverter data: devaddr -> {sensor_name: value}
         self.inverter_data: dict[int, dict[str, Any]] = {}
@@ -173,7 +188,9 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """First heartbeat received -- collector identified. Discover inverters, start polling."""
         self.collector_pn = collector_pn
         self.collector_ip = remote_ip
-        logger.info("Collector identified: %s (ip=%s) -- scanning RS485 bus", collector_pn, remote_ip)
+        self.collector_mac = _arp_lookup(remote_ip)
+        logger.info("Collector identified: %s (ip=%s mac=%s) -- scanning RS485 bus",
+                     collector_pn, remote_ip, self.collector_mac or "unknown")
 
         # Update config entry title to show logger PN and IP
         if collector_pn:
@@ -407,12 +424,15 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         pn = self.collector_pn or "unknown"
         name = f"Logger {pn} ({self.collector_ip})" if self.collector_ip else f"Logger {pn}"
-        return {
+        info: dict[str, Any] = {
             "identifiers": {(DOMAIN, f"{self._entry.entry_id}_logger")},
             "name": name,
             "manufacturer": "EyeBond",
             "model": "WiFi Collector",
         }
+        if self.collector_mac:
+            info["connections"] = {(dr.CONNECTION_NETWORK_MAC, self.collector_mac)}
+        return info
 
     def device_info_dict(self, devaddr: int) -> dict[str, Any]:
         """Device info dict for a specific inverter.
@@ -453,14 +473,17 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         info = self.logger_device_info()
         registry = dr.async_get(self.hass)
-        registry.async_get_or_create(
-            config_entry_id=self._entry.entry_id,
-            identifiers=info["identifiers"],
-            name=info["name"],
-            manufacturer=info.get("manufacturer"),
-            model=info.get("model"),
-        )
-        logger.debug("Logger device registered: %s", info["name"])
+        kwargs: dict[str, Any] = {
+            "config_entry_id": self._entry.entry_id,
+            "identifiers": info["identifiers"],
+            "name": info["name"],
+            "manufacturer": info.get("manufacturer"),
+            "model": info.get("model"),
+        }
+        if "connections" in info:
+            kwargs["connections"] = info["connections"]
+        registry.async_get_or_create(**kwargs)
+        logger.debug("Logger device registered: %s (mac=%s)", info["name"], self.collector_mac)
 
     def _update_device_registry(self, devaddr: int) -> None:
         """Push current inverter_info into the HA device registry.
