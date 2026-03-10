@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SmartESS Local Connection",
+        "description": "Configure the local server that the EyeBond WiFi collector will connect to.",
+        "data": {
+          "server_ip": "Server IP address (reachable from collector subnet)",
+          "tcp_port": "TCP port",
+          "udp_port": "UDP discovery port",
+          "udp_broadcast_ip": "UDP broadcast (subnet, e.g. x.x.x.255, or logger IP if broadcast blocked)",
+          "heartbeat_interval": "Heartbeat interval (seconds)",
+          "inverter_count": "Number of inverters on RS485 bus"
+        }
+      }
+    },
+    "error": {
+      "invalid_ip": "Invalid IP address"
+    },
+    "abort": {
+      "already_configured": "This server:port combination is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polling Intervals",
+        "description": "Configure how often each group of commands is polled. Values in seconds. Set to 0 to disable a group.",
+        "data": {
+          "poll_fast": "Fast (GS, GS2, MOD)",
+          "poll_medium": "Medium (FWS)",
+          "poll_slow": "Slow (ET, FLAG)",
+          "inverter_count": "Number of inverters on RS485 bus"
+        }
+      }
+    }
+  }
+}

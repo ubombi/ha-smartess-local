@@ -1,0 +1,12 @@
+{
+  "domain": "smartess_local",
+  "name": "SmartESS Local",
+  "integration_type": "hub",
+  "codeowners": ["@ubombi"],
+  "config_flow": true,
+  "documentation": "https://github.com/ubombi/ha-smartess-local",
+  "issue_tracker": "https://github.com/ubombi/ha-smartess-local/issues",
+  "iot_class": "local_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}
