@@ -18,6 +18,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -70,7 +71,7 @@ ENERGY_SENSOR_DEFS: list[EnergySensorDef] = [
     # Instantaneous computed power (W)
     EnergySensorDef(
         key="battery_charging_power",
-        name="Battery Charging Power",
+        name="Battery Charging Power (est.)",
         unit="W",
         device_class="power",
         state_class="measurement",
@@ -81,7 +82,7 @@ ENERGY_SENSOR_DEFS: list[EnergySensorDef] = [
     ),
     EnergySensorDef(
         key="battery_discharging_power",
-        name="Battery Discharging Power",
+        name="Battery Discharging Power (est.)",
         unit="W",
         device_class="power",
         state_class="measurement",
@@ -93,7 +94,7 @@ ENERGY_SENSOR_DEFS: list[EnergySensorDef] = [
     # Integrated energy counters (kWh)
     EnergySensorDef(
         key="ac_output_energy",
-        name="AC Output Energy",
+        name="AC Output Energy (est.)",
         unit="kWh",
         device_class="energy",
         state_class="total_increasing",
@@ -104,7 +105,7 @@ ENERGY_SENSOR_DEFS: list[EnergySensorDef] = [
     ),
     EnergySensorDef(
         key="battery_charge_energy",
-        name="Battery Charge Energy",
+        name="Battery Charge Energy (est.)",
         unit="kWh",
         device_class="energy",
         state_class="total_increasing",
@@ -115,7 +116,7 @@ ENERGY_SENSOR_DEFS: list[EnergySensorDef] = [
     ),
     EnergySensorDef(
         key="battery_discharge_energy",
-        name="Battery Discharge Energy",
+        name="Battery Discharge Energy (est.)",
         unit="kWh",
         device_class="energy",
         state_class="total_increasing",
@@ -127,7 +128,7 @@ ENERGY_SENSOR_DEFS: list[EnergySensorDef] = [
     # PV energy (integrated from directly-reported PV1 power)
     EnergySensorDef(
         key="pv1_energy",
-        name="PV1 Energy",
+        name="PV1 Energy (est.)",
         unit="kWh",
         device_class="energy",
         state_class="total_increasing",
@@ -151,6 +152,8 @@ async def async_setup_entry(
     for devaddr in coordinator.inverter_addresses:
         for cmd, sensors in SENSOR_MAP.items():
             for sensor_def in sensors:
+                if not sensor_def.entity:
+                    continue
                 entities.append(InverterSensor(coordinator, sensor_def, cmd, devaddr))
 
     energy_entities: list[InverterEnergySensor] = []
@@ -199,6 +202,9 @@ class InverterSensor(CoordinatorEntity[InverterCoordinator], SensorEntity):
 
         # PIRI ratings, technical fields etc. hidden by default
         self._attr_entity_registry_enabled_default = sensor_def.enabled_default
+
+        if sensor_def.diagnostic:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def device_info(self) -> DeviceInfo:

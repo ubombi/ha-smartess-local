@@ -80,6 +80,8 @@ class InverterInfo:
     model_name: str = ""
     serial_number: str = ""
     firmware_version: str = ""
+    power_rating: int = 0       # W, from PIRI ac_output_active_power_rating
+    voltage_rating: float = 0.0 # V, from PIRI battery_voltage_rating
 
 
 class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -368,8 +370,15 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if cmd == "VFW" and "firmware_version" in values:
             info.firmware_version = str(values["firmware_version"])
             logger.debug("[addr=%d] Firmware: %s", devaddr, info.firmware_version)
+        if cmd == "PIRI":
+            if "ac_output_active_power_rating" in values:
+                info.power_rating = int(values["ac_output_active_power_rating"])
+            if "battery_voltage_rating" in values:
+                info.voltage_rating = float(values["battery_voltage_rating"])
+            if info.power_rating or info.voltage_rating:
+                logger.debug("[addr=%d] Ratings: %dW / %.0fV", devaddr, info.power_rating, info.voltage_rating)
 
-        if cmd in ("GMN", "ID", "VFW"):
+        if cmd in ("GMN", "ID", "VFW", "PIRI"):
             self._update_device_registry(devaddr)
 
         # Merge into accumulated data for this inverter
@@ -458,7 +467,16 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "via_device": (DOMAIN, f"{self._entry.entry_id}_logger"),
         }
         if info.model_name:
-            result["model"] = info.model_name
+            model = info.model_name
+            # Append ratings from PIRI if available: "07 - 5000W/48V"
+            if info.power_rating or info.voltage_rating:
+                specs = []
+                if info.power_rating:
+                    specs.append(f"{info.power_rating}W")
+                if info.voltage_rating:
+                    specs.append(f"{info.voltage_rating:g}V")
+                model = f"{model} - {'/'.join(specs)}"
+            result["model"] = model
         if info.firmware_version:
             result["sw_version"] = info.firmware_version
         if info.serial_number:
@@ -488,8 +506,9 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _update_device_registry(self, devaddr: int) -> None:
         """Push current inverter_info into the HA device registry.
 
-        Called after GMN/ID/VFW so device name, model, serial, firmware
+        Called after GMN/ID/VFW/PIRI so device name, model, serial, firmware
         stay current even if the device was deleted and recreated.
+        Does not overwrite user-customized name (name_by_user).
         """
         info_dict = self.device_info_dict(devaddr)
         registry = dr.async_get(self.hass)
@@ -497,7 +516,10 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not device:
             return
 
-        kwargs: dict[str, Any] = {"name": info_dict["name"]}
+        kwargs: dict[str, Any] = {}
+        # Only update integration name; name_by_user (user rename) is untouched
+        if not device.name_by_user:
+            kwargs["name"] = info_dict["name"]
         if "model" in info_dict:
             kwargs["model"] = info_dict["model"]
         if "sw_version" in info_dict:
@@ -505,5 +527,6 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if "serial_number" in info_dict:
             kwargs["serial_number"] = info_dict["serial_number"]
 
-        registry.async_update_device(device.id, **kwargs)
-        logger.debug("[addr=%d] Device registry updated: %s", devaddr, kwargs)
+        if kwargs:
+            registry.async_update_device(device.id, **kwargs)
+            logger.debug("[addr=%d] Device registry updated: %s", devaddr, kwargs)

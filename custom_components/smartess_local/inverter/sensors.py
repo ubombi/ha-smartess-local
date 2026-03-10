@@ -29,6 +29,8 @@ class SensorDef:
     icon: Optional[str] = None
     enabled_default: bool = True  # False = disabled in HA UI by default
     label: str = ""     # Human-friendly display name; if empty, auto-generated from name
+    entity: bool = True           # False = parsed for internal use, no HA entity created
+    diagnostic: bool = False      # True = entity_category=DIAGNOSTIC in HA
 
 
 # ---------------------------------------------------------------------------
@@ -39,8 +41,10 @@ class SensorDef:
 # NOTE: Differs from standard QPIGS! Fields 7-15 are rearranged vs ESPHome/pipsolar.
 # Indices 8-11, 14-15 are AMBIGUOUS (all zero at night) -- need daytime PV data to confirm.
 _GS_SENSORS = [
-    SensorDef("grid_voltage",             0,  "V",  "voltage",        "measurement", scale=0.1),
-    SensorDef("grid_frequency",           1,  "Hz", "frequency",      "measurement", scale=0.1),
+    SensorDef("grid_voltage",             0,  "V",  "voltage",        "measurement", scale=0.1,
+              label="AC Grid Voltage"),
+    SensorDef("grid_frequency",           1,  "Hz", "frequency",      "measurement", scale=0.1,
+              label="AC Grid Frequency"),
     SensorDef("ac_output_voltage",        2,  "V",  "voltage",        "measurement", scale=0.1,
               label="AC Output Voltage"),
     SensorDef("ac_output_frequency",      3,  "Hz", "frequency",      "measurement", scale=0.1,
@@ -48,34 +52,35 @@ _GS_SENSORS = [
     SensorDef("ac_output_apparent_power", 4,  "VA", "apparent_power", "measurement",
               label="AC Output Apparent Power"),
     SensorDef("ac_output_active_power",   5,  "W",  "power",          "measurement",
-              label="AC Output Active Power"),
-    SensorDef("output_load_percent",      6,  "%",  None,             "measurement", icon="mdi:percent"),
+              label="AC Output Power"),
+    SensorDef("output_load_percent",      6,  "%",  None,             "measurement",
+              icon="mdi:percent", label="AC Output Load"),
     # --- CONFIRMED: 54.4V = battery voltage for 48V system at float ---
     SensorDef("battery_voltage",          7,  "V",  "voltage",        "measurement", scale=0.1,
-              icon="mdi:battery"),
-    # --- AMBIGUOUS: all zero at night, need daytime data ---
+              icon="mdi:battery", label="Battery Voltage"),
+    # --- Always 0 on 0994 ---
     SensorDef("battery_voltage_from_scc", 8,  "V",  "voltage",        "measurement", scale=0.1,
-              label="Battery Voltage From SCC"),  # GUESS -- 0V at night plausible
+              label="Battery Voltage SCC", diagnostic=True),
     SensorDef("battery_charging_current", 9,  "A",  "current",        "measurement",
-              icon="mdi:current-dc"),  # GUESS -- 0A at night plausible
+              icon="mdi:current-dc", label="Battery Charge Current"),
     SensorDef("battery_discharge_current",10, "A",  "current",        "measurement",
-              icon="mdi:current-dc"),  # GUESS -- 0A on grid plausible
+              icon="mdi:current-dc", label="Battery Discharge Current"),
     SensorDef("gs_field_11",              11, value_type=int,
-              enabled_default=False),  # UNKNOWN -- always 0? bus_voltage? pv_current?
+              enabled_default=False, diagnostic=True),  # UNKNOWN
     # --- CONFIRMED: raw 100 = 100% battery, NO ×0.1 scale ---
     SensorDef("battery_capacity",         12, "%",  "battery",        "measurement",
-              icon="mdi:battery"),
+              icon="mdi:battery", label="Battery SOC"),
     # --- CONFIRMED: raw 032 = 32°C, NO ×0.1 scale ---
     SensorDef("inverter_heat_sink_temp",  13, "°C", "temperature",    "measurement",
-              icon="mdi:thermometer"),
+              icon="mdi:thermometer", label="Inverter Heat Sink Temp", diagnostic=True),
     # --- Fields 14-15: always zero on 0994, PV data at 16/18 instead ---
     # --- Fields 16-18: CONFIRMED PV1 power and voltage (verified against SmartESS app) ---
     SensorDef("pv1_input_power",          16, "W",  "power",          "measurement",
-              icon="mdi:solar-power", label="PV1 Input Power"),
+              icon="mdi:solar-power", label="PV1 Power"),
     SensorDef("pv1_input_voltage",        18, "V",  "voltage",        "measurement", scale=0.1,
-              icon="mdi:solar-power", label="PV1 Input Voltage"),
+              icon="mdi:solar-power", label="PV1 Voltage"),
     SensorDef("pv2_input_power",          19, "W",  "power",          "measurement",
-              icon="mdi:solar-power", label="PV2 Input Power",
+              icon="mdi:solar-power", label="PV2 Power",
               enabled_default=False),  # 0 on single-MPPT systems
     SensorDef("device_status2",           20, value_type=str, icon="mdi:information-outline",
               enabled_default=False),
@@ -94,9 +99,11 @@ _GS_SENSORS = [
 
 _GS2_SENSORS = [
     SensorDef("pv2_input_voltage",   1, "V", "voltage", "measurement", scale=0.1,
-              icon="mdi:solar-power", label="PV2 Input Voltage"),
+              icon="mdi:solar-power", label="PV2 Voltage",
+              enabled_default=False),
     SensorDef("pv2_charging_power",  2, "W", "power",   "measurement",
-              icon="mdi:solar-power", label="PV2 Charging Power"),
+              icon="mdi:solar-power", label="PV2 Charging Power",
+              enabled_default=False),
 ]
 
 # ---------------------------------------------------------------------------
@@ -292,10 +299,10 @@ _FLAG_SENSORS = [
 # Static / identification commands
 # ---------------------------------------------------------------------------
 
-_PI_SENSORS  = [SensorDef("protocol_id",      0, value_type=str, enabled_default=False)]
-_GMN_SENSORS = [SensorDef("model_name",        0, value_type=str, icon="mdi:information")]
-_ID_SENSORS  = [SensorDef("serial_number",     0, value_type=str, icon="mdi:identifier")]
-_VFW_SENSORS = [SensorDef("firmware_version",  0, value_type=str, icon="mdi:chip")]
+_PI_SENSORS  = [SensorDef("protocol_id",      0, value_type=str, diagnostic=True)]
+_GMN_SENSORS = [SensorDef("model_name",        0, value_type=str, icon="mdi:information", entity=False)]
+_ID_SENSORS  = [SensorDef("serial_number",     0, value_type=str, icon="mdi:identifier", entity=False)]
+_VFW_SENSORS = [SensorDef("firmware_version",  0, value_type=str, icon="mdi:chip", entity=False)]
 
 
 # ---------------------------------------------------------------------------
