@@ -1,7 +1,7 @@
 {
   "domain": "smartess_local",
   "name": "SmartESS Local",
-  "integration_type": "hub",
+  "integration_type": "device",
   "codeowners": ["@ubombi"],
   "config_flow": true,
   "documentation": "https://github.com/ubombi/ha-smartess-local",

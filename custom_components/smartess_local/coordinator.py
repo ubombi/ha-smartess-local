@@ -87,6 +87,7 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Collector info (populated after first heartbeat)
         self.collector_pn: str = ""
+        self.collector_ip: str = ""
 
         # Per-inverter data: devaddr -> {sensor_name: value}
         self.inverter_data: dict[int, dict[str, Any]] = {}
@@ -168,16 +169,16 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Collector callbacks
     # ------------------------------------------------------------------
 
-    async def _on_collector_connect(self, collector_pn: str) -> None:
+    async def _on_collector_connect(self, collector_pn: str, remote_ip: str) -> None:
         """First heartbeat received -- collector identified. Discover inverters, start polling."""
         self.collector_pn = collector_pn
-        logger.info("Collector identified: %s -- scanning RS485 bus", collector_pn)
+        self.collector_ip = remote_ip
+        logger.info("Collector identified: %s (ip=%s) -- scanning RS485 bus", collector_pn, remote_ip)
 
-        # Update config entry title to show logger PN
+        # Update config entry title to show logger PN and IP
         if collector_pn:
-            self.hass.config_entries.async_update_entry(
-                self._entry, title=f"Logger {collector_pn}",
-            )
+            title = f"Logger {collector_pn} ({remote_ip})" if remote_ip else f"Logger {collector_pn}"
+            self.hass.config_entries.async_update_entry(self._entry, title=title)
 
         # Stop UDP announcer (collector is here)
         if self._udp:
@@ -405,9 +406,10 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Acts as a parent device for all inverters on its RS485 bus.
         """
         pn = self.collector_pn or "unknown"
+        name = f"Logger {pn} ({self.collector_ip})" if self.collector_ip else f"Logger {pn}"
         return {
-            "identifiers": {(DOMAIN, self._entry.entry_id, "logger")},
-            "name": f"Logger {pn}",
+            "identifiers": {(DOMAIN, f"{self._entry.entry_id}_logger")},
+            "name": name,
             "manufacturer": "EyeBond",
             "model": "WiFi Collector",
         }
@@ -430,10 +432,10 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Stable identifier: entry_id + devaddr (never changes)
         result: dict[str, Any] = {
-            "identifiers": {(DOMAIN, self._entry.entry_id, str(devaddr))},
+            "identifiers": {(DOMAIN, f"{self._entry.entry_id}_{devaddr}")},
             "name": name,
             "manufacturer": "Voltronic",
-            "via_device": (DOMAIN, self._entry.entry_id, "logger"),
+            "via_device": (DOMAIN, f"{self._entry.entry_id}_logger"),
         }
         if info.model_name:
             result["model"] = info.model_name

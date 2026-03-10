@@ -54,14 +54,14 @@ class TCPServer:
         port: int = 8899,
         heartbeat_interval: float = 60.0,
         request_timeout: float = 5.0,
-        on_connect: Optional[Callable[[str], Awaitable[None]]] = None,
+        on_connect: Optional[Callable[[str, str], Awaitable[None]]] = None,
         on_disconnect: Optional[Callable[[], Awaitable[None]]] = None,
     ):
         self.host = host
         self.port = port
         self.heartbeat_interval = heartbeat_interval
         self.request_timeout = request_timeout
-        self.on_connect = on_connect      # callback(collector_pn)
+        self.on_connect = on_connect      # callback(collector_pn, remote_ip)
         self.on_disconnect = on_disconnect
         self._conn: Optional[CollectorConnection] = None
         self._server: Optional[asyncio.Server] = None
@@ -206,8 +206,10 @@ class TCPServer:
                     # this read loop to be running to receive responses)
                     if self.on_connect and pn and not conn.pn_notified:
                         conn.pn_notified = True
-                        logger.debug("First heartbeat -- scheduling on_connect(%s)", pn)
-                        asyncio.create_task(self.on_connect(pn))
+                        peername_info = conn.writer.get_extra_info("peername")
+                        remote_ip = peername_info[0] if peername_info else "unknown"
+                        logger.debug("First heartbeat -- scheduling on_connect(%s, %s)", pn, remote_ip)
+                        asyncio.create_task(self.on_connect(pn, remote_ip))
 
                 elif hdr.fcode == FC_FORWARD2DEVICE:
                     logger.debug("RX FC=4 response TID=%d devaddr=%d payload(%d)=%s",
