@@ -463,7 +463,7 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         result: dict[str, Any] = {
             "identifiers": {(DOMAIN, f"{self._entry.entry_id}_{devaddr}")},
             "name": name,
-            "manufacturer": "Voltronic",
+            "manufacturer": "Voltronic (probably)",
             "via_device": (DOMAIN, f"{self._entry.entry_id}_logger"),
         }
         if info.model_name:

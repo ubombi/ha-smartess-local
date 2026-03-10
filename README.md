@@ -71,12 +71,12 @@ battery_discharge_energy (kWh, total_increasing)
 
 ## TODO
 
-- [ ] Map GS fields 8-11, 14-15 (need daytime PV data)
-- [ ] Map GS2 remaining 14 fields
-- [ ] Battery type label (8: LIC vs LIB)
+- [ ] Map GS fields 8-9, 11 (charge current always 0, field 11 unknown)
+- [ ] Map GS2 fields 3-16 (need dual-MPPT to test)
+- [ ] PV2 sensors: auto-discover via available_on_nonzero
 - [ ] Verify RX CRC
 - [ ] Test flag commands PEC..PDJ
-- [ ] Regroup entities (PV / ESS / UPS sections)
+- [ ] Diagnostics platform (coordinator state dump for bug reports)
 - [ ] PI18/PI30 support
 - [ ] HACS
 - [ ] Drop dead crc16_modbus()
