@@ -46,11 +46,11 @@ SELECT_DEFS: list[SelectDef] = [
     SelectDef(
         key="charger_source_priority",
         name="Charger Source Priority",
-        p17_template="PCP0,{value}",
+        p17_template="PSP{value}",
         options={
-            0: "Grid first",
+            0: "Utility first",
             1: "Solar first",
-            2: "Solar + Grid",
+            2: "Solar + Utility",
             3: "Solar only",
         },
         icon="mdi:ev-station",

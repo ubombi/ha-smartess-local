@@ -201,11 +201,13 @@ class TCPServer:
                     conn.last_heartbeat = time.time()
                     logger.info("Heartbeat RX -- collector PN: %s  devcode=0x%04X devaddr=0x%02X",
                                 pn, hdr.devcode, hdr.devaddr)
-                    # Fire on_connect callback once
+                    # Fire on_connect callback once (as task, not awaited --
+                    # the callback may call send_p17_command which needs
+                    # this read loop to be running to receive responses)
                     if self.on_connect and pn and not conn.pn_notified:
                         conn.pn_notified = True
-                        logger.debug("First heartbeat -- firing on_connect(%s)", pn)
-                        await self.on_connect(pn)
+                        logger.debug("First heartbeat -- scheduling on_connect(%s)", pn)
+                        asyncio.create_task(self.on_connect(pn))
 
                 elif hdr.fcode == FC_FORWARD2DEVICE:
                     logger.debug("RX FC=4 response TID=%d devaddr=%d payload(%d)=%s",

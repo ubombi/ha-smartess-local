@@ -124,6 +124,18 @@ ENERGY_SENSOR_DEFS: list[EnergySensorDef] = [
         compute="multiply",
         accumulate=True,
     ),
+    # PV energy (integrated from directly-reported PV1 power)
+    EnergySensorDef(
+        key="pv1_energy",
+        name="PV1 Energy",
+        unit="kWh",
+        device_class="energy",
+        state_class="total_increasing",
+        icon="mdi:solar-power",
+        source_keys=["pv1_input_power"],
+        compute="passthrough",
+        accumulate=True,
+    ),
 ]
 
 

@@ -1,7 +1,7 @@
 """Config flow for SmartESS Local integration.
 
 Supports multiple config entries (one per collector).
-Options flow for per-entry poll intervals and inverter count.
+Options flow for per-entry poll intervals.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from custom_components.smartess_local.const import (
     CONF_UDP_PORT,
     CONF_UDP_BROADCAST_IP,
     CONF_HEARTBEAT_INTERVAL,
-    CONF_INVERTER_COUNT,
     CONF_POLL_FAST,
     CONF_POLL_MEDIUM,
     CONF_POLL_SLOW,
@@ -34,7 +33,6 @@ from custom_components.smartess_local.const import (
     DEFAULT_UDP_PORT,
     DEFAULT_UDP_BROADCAST_IP,
     DEFAULT_HEARTBEAT_INTERVAL,
-    DEFAULT_INVERTER_COUNT,
     DEFAULT_POLL_FAST,
     DEFAULT_POLL_MEDIUM,
     DEFAULT_POLL_SLOW,
@@ -116,9 +114,6 @@ class SmartessConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_UDP_PORT, default=DEFAULT_UDP_PORT): int,
                 vol.Required(CONF_UDP_BROADCAST_IP, default=default_broadcast): str,
                 vol.Required(CONF_HEARTBEAT_INTERVAL, default=DEFAULT_HEARTBEAT_INTERVAL): int,
-                vol.Required(CONF_INVERTER_COUNT, default=DEFAULT_INVERTER_COUNT): vol.All(
-                    int, vol.Range(min=1, max=16)
-                ),
             }
         )
 
@@ -135,17 +130,12 @@ class SmartessOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage polling intervals and inverter count."""
+        """Manage polling intervals."""
         if user_input is not None:
             logger.debug("Options updated: %s", user_input)
             return self.async_create_entry(data=user_input)
 
         current = self.config_entry.options
-        # Also fall back to initial data for inverter_count
-        inv_count = current.get(
-            CONF_INVERTER_COUNT,
-            self.config_entry.data.get(CONF_INVERTER_COUNT, DEFAULT_INVERTER_COUNT),
-        )
 
         data_schema = vol.Schema(
             {
@@ -161,10 +151,6 @@ class SmartessOptionsFlow(OptionsFlow):
                     CONF_POLL_SLOW,
                     default=current.get(CONF_POLL_SLOW, DEFAULT_POLL_SLOW),
                 ): vol.All(int, vol.Range(min=0, max=86400)),
-                vol.Required(
-                    CONF_INVERTER_COUNT,
-                    default=inv_count,
-                ): vol.All(int, vol.Range(min=1, max=16)),
             }
         )
 

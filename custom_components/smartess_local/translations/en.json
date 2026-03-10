@@ -9,8 +9,7 @@
           "tcp_port": "TCP port",
           "udp_port": "UDP discovery port",
           "udp_broadcast_ip": "UDP broadcast (subnet, e.g. x.x.x.255, or logger IP if broadcast blocked)",
-          "heartbeat_interval": "Heartbeat interval (seconds)",
-          "inverter_count": "Number of inverters on RS485 bus"
+          "heartbeat_interval": "Heartbeat interval (seconds)"
         }
       }
     },
@@ -29,8 +28,7 @@
         "data": {
           "poll_fast": "Fast (GS, GS2, MOD)",
           "poll_medium": "Medium (FWS)",
-          "poll_slow": "Slow (ET, FLAG)",
-          "inverter_count": "Number of inverters on RS485 bus"
+          "poll_slow": "Slow (ET, FLAG)"
         }
       }
     }

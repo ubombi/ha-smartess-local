@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -20,20 +20,20 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from custom_components.smartess_local.const import (
     DOMAIN,
+    PLATFORMS,
     CONF_SERVER_IP,
     CONF_TCP_PORT,
     CONF_UDP_PORT,
     CONF_UDP_BROADCAST_IP,
     CONF_HEARTBEAT_INTERVAL,
-    CONF_INVERTER_COUNT,
     CONF_POLL_FAST,
     CONF_POLL_MEDIUM,
     CONF_POLL_SLOW,
+    MAX_INVERTER_ADDRESS,
     DEFAULT_TCP_PORT,
     DEFAULT_UDP_PORT,
     DEFAULT_UDP_BROADCAST_IP,
     DEFAULT_HEARTBEAT_INTERVAL,
-    DEFAULT_INVERTER_COUNT,
     DEFAULT_POLL_FAST,
     DEFAULT_POLL_MEDIUM,
     DEFAULT_POLL_SLOW,
@@ -42,7 +42,8 @@ from custom_components.smartess_local.const import (
 from custom_components.smartess_local.server.tcp_server import TCPServer
 from custom_components.smartess_local.server.udp_announcer import UDPAnnouncer
 from custom_components.smartess_local.inverter.poller import InverterPoller
-from custom_components.smartess_local.protocol.p17 import build_set, parse_response as parse_p17
+from custom_components.smartess_local.protocol.p17 import build_poll, build_set, parse_response as parse_p17
+from custom_components.smartess_local.inverter.sensors import parse_response as parse_sensor_response
 
 logger = logging.getLogger(__name__)
 
@@ -92,19 +93,11 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Per-inverter metadata
         self.inverter_info: dict[int, InverterInfo] = {}
 
-        # Inverter addresses (1-based)
-        inv_count = entry.data.get(CONF_INVERTER_COUNT, DEFAULT_INVERTER_COUNT)
-        # Also check options (can be changed later)
-        inv_count = entry.options.get(CONF_INVERTER_COUNT, inv_count)
-        self.inverter_addresses: list[int] = list(range(1, int(inv_count) + 1))
+        # Inverter addresses (1-based), populated by _discover_inverters()
+        self.inverter_addresses: list[int] = []
+        self._platforms_loaded = False
 
-        logger.debug("Coordinator init: entry_id=%s inverter_addresses=%s",
-                      entry.entry_id, self.inverter_addresses)
-
-        # Initialize data dicts
-        for addr in self.inverter_addresses:
-            self.inverter_data[addr] = {}
-            self.inverter_info[addr] = InverterInfo()
+        logger.debug("Coordinator init: entry_id=%s (discovery pending)", entry.entry_id)
 
     @property
     def connected(self) -> bool:
@@ -124,8 +117,8 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         broadcast_ip = cfg.get(CONF_UDP_BROADCAST_IP, DEFAULT_UDP_BROADCAST_IP)
         heartbeat_interval = cfg.get(CONF_HEARTBEAT_INTERVAL, DEFAULT_HEARTBEAT_INTERVAL)
 
-        logger.info("Setting up SmartESS Local coordinator: server=%s:%d udp=%d inverters=%s",
-                     server_ip, tcp_port, udp_port, self.inverter_addresses)
+        logger.info("Setting up SmartESS Local coordinator: server=%s:%d udp=%d (discovery pending)",
+                     server_ip, tcp_port, udp_port)
 
         # TCP server
         self._tcp = TCPServer(
@@ -176,10 +169,9 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ------------------------------------------------------------------
 
     async def _on_collector_connect(self, collector_pn: str) -> None:
-        """First heartbeat received -- collector identified. Start polling."""
+        """First heartbeat received -- collector identified. Discover inverters, start polling."""
         self.collector_pn = collector_pn
-        logger.info("Collector identified: %s -- starting pollers for %s",
-                     collector_pn, self.inverter_addresses)
+        logger.info("Collector identified: %s -- scanning RS485 bus", collector_pn)
 
         # Update config entry title to show logger PN
         if collector_pn:
@@ -190,6 +182,31 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Stop UDP announcer (collector is here)
         if self._udp:
             await self._udp.stop()
+
+        # Let collector settle after heartbeat handshake before sending P17 commands
+        await asyncio.sleep(2.0)
+
+        # Discover inverters on the RS485 bus (retry on transient failure)
+        for attempt in range(1, 4):
+            await self._discover_inverters()
+            if self.inverter_addresses:
+                break
+            delay = 2 * attempt
+            logger.warning("No inverters found (attempt %d/3) -- retrying in %ds", attempt, delay)
+            await asyncio.sleep(delay)
+
+        if not self.inverter_addresses:
+            logger.error("No inverters found on RS485 bus after 3 attempts (scanned 1..%d)",
+                         MAX_INVERTER_ADDRESS)
+            return
+
+        # Register logger device (parent for all inverters on this bus)
+        self._register_logger_device()
+
+        # Load entity platforms (sensor/select/number/switch) now that we know the addresses
+        if not self._platforms_loaded:
+            self._platforms_loaded = True
+            await self.hass.config_entries.async_forward_entry_setups(self._entry, PLATFORMS)
 
         # Build poll intervals from options (or defaults)
         opts = self._entry.options
@@ -224,6 +241,85 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async def on_result(cmd: str, values: dict[str, Any]) -> None:
             await self._on_poll_result(devaddr, cmd, values)
         return on_result
+
+    # ------------------------------------------------------------------
+    # RS485 bus discovery
+    # ------------------------------------------------------------------
+
+    async def _discover_inverters(self) -> None:
+        """Probe RS485 addresses 1..MAX_INVERTER_ADDRESS with PI command.
+
+        Addresses are contiguous starting from 1, so we stop at the first
+        address that NAKs or times out.  Also queries ID to get serial number
+        for each discovered inverter (needed for device naming before entities
+        are created).
+        """
+        discovered: list[int] = []
+        for addr in range(1, MAX_INVERTER_ADDRESS + 1):
+            try:
+                frame = build_poll("PI")
+                raw = await self._tcp.send_p17_command(frame, devaddr=addr)
+                cmd_type, _data = parse_p17(raw)
+                if cmd_type == "N":  # NAK
+                    logger.debug("Address %d NAK'd PI -- end of bus", addr)
+                    break
+                # Valid response (D or A) = inverter present
+                discovered.append(addr)
+                logger.debug("Address %d responded to PI: type=%s", addr, cmd_type)
+            except asyncio.TimeoutError:
+                logger.debug("Address %d timed out -- end of bus", addr)
+                break
+            except ConnectionError:
+                logger.warning("Collector disconnected during discovery")
+                break
+            except Exception as e:
+                logger.warning("Address %d probe error: %s -- skipping", addr, e)
+                break
+
+        # Query serial for each discovered address, deduplicate by serial.
+        # Some collectors forward to the same inverter regardless of devaddr,
+        # causing all 16 addresses to echo the same response. Stop as soon
+        # as we see a duplicate serial (addresses are contiguous).
+        seen_serials: set[str] = set()
+        unique: list[int] = []
+        for addr in discovered:
+            if addr not in self.inverter_data:
+                self.inverter_data[addr] = {}
+            if addr not in self.inverter_info:
+                self.inverter_info[addr] = InverterInfo()
+            await self._query_serial(addr)
+            sn = self.inverter_info[addr].serial_number
+            if sn and sn in seen_serials:
+                logger.debug("Address %d has duplicate serial %s -- end of unique inverters", addr, sn)
+                break
+            if sn:
+                seen_serials.add(sn)
+            unique.append(addr)
+
+        if len(unique) < len(discovered):
+            logger.info("Deduplicated %d -> %d addresses (collector echoes all devaddrs)",
+                        len(discovered), len(unique))
+
+        self.inverter_addresses = unique
+        serials = {a: self.inverter_info[a].serial_number for a in unique}
+        logger.info("Found %d inverter(s) on RS485 bus: %s", len(unique), serials)
+
+    async def _query_serial(self, devaddr: int) -> None:
+        """Query ID command to get serial number for a single inverter."""
+        try:
+            frame = build_poll("ID")
+            raw = await self._tcp.send_p17_command(frame, devaddr=devaddr)
+            cmd_type, response_data = parse_p17(raw)
+            if cmd_type == "N":
+                logger.debug("[addr=%d] ID NAK'd during discovery", devaddr)
+                return
+            values = parse_sensor_response("ID", response_data)
+            sn = values.get("serial_number", "")
+            if sn:
+                self.inverter_info[devaddr].serial_number = str(sn)
+                logger.debug("[addr=%d] Serial: %s", devaddr, sn)
+        except Exception as e:
+            logger.warning("[addr=%d] ID query failed during discovery: %s", devaddr, e)
 
     async def _on_collector_disconnect(self) -> None:
         """Collector dropped. Stop pollers, restart UDP announcer."""
@@ -303,30 +399,41 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Device info for HA device registry
     # ------------------------------------------------------------------
 
+    def logger_device_info(self) -> dict[str, Any]:
+        """Device info dict for the collector (logger) dongle.
+
+        Acts as a parent device for all inverters on its RS485 bus.
+        """
+        pn = self.collector_pn or "unknown"
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id, "logger")},
+            "name": f"Logger {pn}",
+            "manufacturer": "EyeBond",
+            "model": "WiFi Collector",
+        }
+
     def device_info_dict(self, devaddr: int) -> dict[str, Any]:
         """Device info dict for a specific inverter.
 
-        Naming priority:
-          1. serial_number (from ID command, unique per inverter)
-          2. model_name (from GMN command)
-          3. collector_pn (from heartbeat, identifies the logger)
-          4. config entry title (fallback)
-
-        Multi-inverter: always append #devaddr.
+        Name uses serial number when available (queried during discovery),
+        falls back to collector PN + address.
+        Entity IDs derive from this name: sensor.inverter_{serial}_grid_voltage
         """
         info = self.inverter_info.get(devaddr, InverterInfo())
 
-        # Device name: "Inverter" (single) or "Inverter N" (multi)
-        if len(self.inverter_addresses) > 1:
-            name = f"Inverter {devaddr}"
+        if info.serial_number:
+            name = f"Inverter {info.serial_number}"
+        elif self.collector_pn:
+            name = f"Inverter {self.collector_pn} {devaddr}"
         else:
-            name = "Inverter"
+            name = f"Inverter {devaddr}"
 
         # Stable identifier: entry_id + devaddr (never changes)
         result: dict[str, Any] = {
             "identifiers": {(DOMAIN, self._entry.entry_id, str(devaddr))},
             "name": name,
             "manufacturer": "Voltronic",
+            "via_device": (DOMAIN, self._entry.entry_id, "logger"),
         }
         if info.model_name:
             result["model"] = info.model_name
@@ -336,6 +443,22 @@ class InverterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             result["serial_number"] = info.serial_number
 
         return result
+
+    def _register_logger_device(self) -> None:
+        """Create the logger (collector dongle) device in the registry.
+
+        This device has no entities -- it exists as a parent for inverter devices.
+        """
+        info = self.logger_device_info()
+        registry = dr.async_get(self.hass)
+        registry.async_get_or_create(
+            config_entry_id=self._entry.entry_id,
+            identifiers=info["identifiers"],
+            name=info["name"],
+            manufacturer=info.get("manufacturer"),
+            model=info.get("model"),
+        )
+        logger.debug("Logger device registered: %s", info["name"])
 
     def _update_device_registry(self, devaddr: int) -> None:
         """Push current inverter_info into the HA device registry.

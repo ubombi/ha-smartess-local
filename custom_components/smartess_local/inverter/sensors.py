@@ -68,19 +68,23 @@ _GS_SENSORS = [
     # --- CONFIRMED: raw 032 = 32°C, NO ×0.1 scale ---
     SensorDef("inverter_heat_sink_temp",  13, "°C", "temperature",    "measurement",
               icon="mdi:thermometer"),
-    # --- AMBIGUOUS: zero at night ---
-    SensorDef("pv_input_current",         14, "A",  "current",        "measurement", scale=0.1,
-              icon="mdi:solar-power", label="PV Input Current"),  # GUESS
-    SensorDef("pv_input_voltage",         15, "V",  "voltage",        "measurement", scale=0.1,
-              icon="mdi:solar-power", label="PV Input Voltage"),  # GUESS
-    SensorDef("device_status",            16, value_type=str, icon="mdi:information-outline",
-              enabled_default=False),
-    SensorDef("battery_voltage_offset",   17, value_type=int,
-              enabled_default=False),
-    SensorDef("eeprom_version",           18, value_type=int,
-              enabled_default=False, label="EEPROM Version"),
-    SensorDef("pv_charging_power",        19, "W",  "power",          "measurement",
-              icon="mdi:solar-power", label="PV Charging Power"),
+    # --- Fields 14-15: zero on 0994 firmware, PV data is at 16/18 instead ---
+    SensorDef("pv_input_current_legacy",  14, "A",  "current",        "measurement", scale=0.1,
+              icon="mdi:solar-power", label="PV Input Current (legacy)",
+              enabled_default=False),  # unused on 0994, PV current not reported separately
+    SensorDef("pv_input_voltage_legacy",  15, "V",  "voltage",        "measurement", scale=0.1,
+              icon="mdi:solar-power", label="PV Input Voltage (legacy)",
+              enabled_default=False),  # unused on 0994, PV voltage at index 18
+    # --- CONFIRMED: PV1 power and voltage (verified against SmartESS app) ---
+    SensorDef("pv1_input_power",          16, "W",  "power",          "measurement",
+              icon="mdi:solar-power", label="PV1 Input Power"),
+    SensorDef("gs_field_17",              17, value_type=int,
+              enabled_default=False),  # always 0, purpose unknown
+    SensorDef("pv1_input_voltage",        18, "V",  "voltage",        "measurement", scale=0.1,
+              icon="mdi:solar-power", label="PV1 Input Voltage"),
+    SensorDef("pv2_input_power",          19, "W",  "power",          "measurement",
+              icon="mdi:solar-power", label="PV2 Input Power",
+              enabled_default=False),  # 0 on single-MPPT systems
     SensorDef("device_status2",           20, value_type=str, icon="mdi:information-outline",
               enabled_default=False),
     SensorDef("status_field_21",          21, value_type=int, enabled_default=False),
@@ -324,6 +328,34 @@ SENSOR_MAP: dict[str, list[SensorDef]] = {
 
 
 # ---------------------------------------------------------------------------
+# P17 length-prefixed string helper
+# ---------------------------------------------------------------------------
+
+# Some P17 string responses (ID, GMN, VFW) use a length-prefixed format:
+#   <2-digit length><string><zero padding>
+# e.g. "1496132212101133000000" → length=14, string="96132212101133"
+_LENGTH_PREFIXED_COMMANDS = {"ID", "GMN", "VFW"}
+
+
+def _decode_length_prefixed(raw: str) -> str:
+    """Decode a P17 length-prefixed string field.
+
+    Format: <NN><string of length NN><optional zero padding>
+    Falls back to stripping trailing zeros if length prefix is invalid.
+    """
+    if len(raw) < 3:
+        return raw.rstrip("0") or raw
+    try:
+        str_len = int(raw[:2])
+        if 0 < str_len <= len(raw) - 2:
+            return raw[2:2 + str_len]
+    except (ValueError, TypeError):
+        pass
+    # Fallback: strip trailing zeros
+    return raw.rstrip("0") or raw
+
+
+# ---------------------------------------------------------------------------
 # Response parser
 # ---------------------------------------------------------------------------
 
@@ -355,8 +387,14 @@ def parse_response(cmd: str, raw: str) -> dict[str, Any]:
         raw_val = fields[sensor.index].strip()
 
         if sensor.value_type is str:
-            result[sensor.name] = raw_val
-            log.debug("[%s] %s [%d] = %r (str)", cmd, sensor.name, sensor.index, raw_val)
+            if cmd in _LENGTH_PREFIXED_COMMANDS:
+                decoded = _decode_length_prefixed(raw_val)
+                log.debug("[%s] %s [%d] = %r -> %r (length-prefixed str)",
+                          cmd, sensor.name, sensor.index, raw_val, decoded)
+                result[sensor.name] = decoded
+            else:
+                result[sensor.name] = raw_val
+                log.debug("[%s] %s [%d] = %r (str)", cmd, sensor.name, sensor.index, raw_val)
         else:
             try:
                 parsed = int(raw_val)

@@ -7,7 +7,8 @@ Each command has its own configurable interval:
 
 Each cycle picks the most overdue command, sends it, waits for response.
 Natural RS485 pacing (~1s per command round-trip) prevents bus contention.
-Commands that NAK are auto-disabled.
+Startup commands always run first (higher priority than regular commands).
+Commands that NAK 3 times consecutively are auto-disabled.
 """
 
 from __future__ import annotations
@@ -33,10 +34,13 @@ SendFunc = Callable[[bytes], Awaitable[bytes]]
 ResultCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
+MAX_NAK_BEFORE_DISABLE = 3
+
+
 class CommandState:
     """Tracks per-command polling state."""
 
-    __slots__ = ("cmd", "interval", "last_run", "disabled", "startup_done")
+    __slots__ = ("cmd", "interval", "last_run", "disabled", "startup_done", "nak_count")
 
     def __init__(self, cmd: str, interval: int):
         self.cmd = cmd
@@ -44,6 +48,7 @@ class CommandState:
         self.last_run: float = 0.0
         self.disabled = interval == 0
         self.startup_done = False
+        self.nak_count: int = 0
 
     @property
     def is_startup_only(self) -> bool:
@@ -53,15 +58,17 @@ class CommandState:
         """How many seconds overdue this command is. Negative = not yet due."""
         if self.disabled:
             return -999999.0
+        # Startup commands get higher priority than regular "never run" commands
         if self.is_startup_only:
-            return 999999.0 if not self.startup_done else -999999.0
+            return 1_000_000.0 if not self.startup_done else -999999.0
         if self.last_run == 0.0:
-            return 999999.0  # never run = maximally overdue
+            return 999_999.0  # never run = maximally overdue (but below startup)
         return now - self.last_run - self.interval
 
     def __repr__(self) -> str:
         return (f"CommandState({self.cmd}, interval={self.interval}, "
-                f"disabled={self.disabled}, startup_done={self.startup_done})")
+                f"disabled={self.disabled}, startup_done={self.startup_done}, "
+                f"nak_count={self.nak_count})")
 
 
 class InverterPoller:
@@ -167,12 +174,20 @@ class InverterPoller:
                          self.devaddr, cs.cmd, cmd_type, response_data)
 
             if cmd_type == "N":  # NAK
-                logger.warning("[addr=%d] %s NAK'd -- disabling", self.devaddr, cs.cmd)
-                cs.disabled = True
+                cs.nak_count += 1
+                if cs.nak_count >= MAX_NAK_BEFORE_DISABLE:
+                    logger.warning("[addr=%d] %s NAK'd %d times -- disabling",
+                                   self.devaddr, cs.cmd, cs.nak_count)
+                    cs.disabled = True
+                else:
+                    logger.info("[addr=%d] %s NAK'd (%d/%d) -- will retry",
+                                self.devaddr, cs.cmd, cs.nak_count, MAX_NAK_BEFORE_DISABLE)
+                    cs.last_run = time.monotonic()  # back off before retry
                 return
 
             values = parse_sensor_response(cs.cmd, response_data)
 
+            cs.nak_count = 0  # reset on success
             cs.last_run = time.monotonic()
             if cs.is_startup_only:
                 cs.startup_done = True

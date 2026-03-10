@@ -8,7 +8,6 @@ CONF_TCP_PORT = "tcp_port"
 CONF_UDP_PORT = "udp_port"
 CONF_UDP_BROADCAST_IP = "udp_broadcast_ip"
 CONF_HEARTBEAT_INTERVAL = "heartbeat_interval"
-CONF_INVERTER_COUNT = "inverter_count"
 
 # --- Options keys (poll intervals, per config entry) ---
 CONF_POLL_FAST = "poll_fast"
@@ -20,7 +19,7 @@ DEFAULT_TCP_PORT = 8899
 DEFAULT_UDP_PORT = 58899
 DEFAULT_UDP_BROADCAST_IP = "255.255.255.255"
 DEFAULT_HEARTBEAT_INTERVAL = 60
-DEFAULT_INVERTER_COUNT = 1
+MAX_INVERTER_ADDRESS = 16   # scan addresses 1..16 during discovery
 DEFAULT_POLL_FAST = 5       # GS, GS2, MOD
 DEFAULT_POLL_MEDIUM = 10    # FWS
 DEFAULT_POLL_SLOW = 60      # ET, FLAG
